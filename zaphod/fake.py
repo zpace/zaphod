@@ -45,6 +45,7 @@ class FakeIFU(object):
         self.nl = self.true_spectra.shape[0]
         self.spatial_shape = self.true_spectra.shape[-2:]
 
+        # make whatever crappy (co)variance array/value into something usable
         if len(K.shape) > 2:
             raise ValueError('invalid shape, only spectral covariance allowed')
         elif len(K.shape) == 2:
@@ -55,6 +56,7 @@ class FakeIFU(object):
             else:
                 self.K = np.diag(K * np.ones(self.nl))
 
+        SNmax_ = np.max(self.true_spectra)
         self.K /= (np.max(np.diag(K)) / SNmax**2.) # scale K now
 
     # =====
@@ -62,19 +64,53 @@ class FakeIFU(object):
     # =====
 
     @classmethod
-    def SingleSFH(cls, spec, true_params, param_names, spatial_shape=[74, 74],
-                  **kwargs):
+    def SingleSFH(cls, l, spec, true_params, param_names,
+                  spatial_shape=(74, 74), F_max=None, F_model=None,
+                  F_params=None, **kwargs):
         '''Make an IFU with a single SFH subject to various levels of noise
 
         Parameters
         ----------
 
-        spec : :obj:`np.ndarray`, optional
-            single spectrum
+        l : :obj:`np.ndarray`
+            wavelength array, units of AA
+
+        spec : :obj:`np.ndarray`
+            single spectrum, units of 1e-17 erg/s/cm2/AA
+
+        true_params : see above
+
+        param_names : see above
+
+        F_max : float, optional
+            maximum flux (simple axis-0 sum of spectrum) over whole IFU
+
+        F_model : function, optional
+            model that gives radial dependence of flux
+
+        F_params : dict, optional
+            parameters that get fed to the model
 
         '''
 
-        pass
+        true_spectra = np.tile(spec[:, None, None], (1,) + spatial_shape)
+
+        XX, YY = self.image_coords
+
+        if not F_model:
+            F_model = lambda XX, YY, r=10: np.exp(-(XX**2. + YY**2.)/r)
+
+        if not F_params:
+            F_params = {}
+        F_params.update('XX': XX, 'YY': YY)
+
+        spec_scale = F_model(**F_params)[None, ...]
+        F = np.sum(spec_scale * true_spectra, axis=0)
+        true_spectra /= (F.max() / F_max)
+
+        kwargs.update(true_spectra)
+        kwargs.update(true_params)
+        kwargs.update(param_names)
 
         return cls(**kwargs)
 
@@ -85,6 +121,11 @@ class FakeIFU(object):
     @property
     def image_shape(self):
         return self.true_spectra.shape[-2:]
+
+    @property
+    def image_coords(self):
+        return np.meshgrid(
+            [np.linspace(-s/2., s/2., s) for s in self.image_shape])
 
     # =====
     # methods
