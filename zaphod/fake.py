@@ -37,13 +37,15 @@ class FakeIFU(object):
 
     '''
 
-    def __init__(self, true_params, param_names, true_spectra, K, SNmax, logl):
+    def __init__(self, true_params, param_names, true_spectra, K, logl,
+                 SNmax=200.):
         self.true_params = true_params
         self.param_names = param_names
         self.true_spectra = true_spectra
 
         self.nl = self.true_spectra.shape[0]
         self.spatial_shape = self.true_spectra.shape[-2:]
+        self.logl = logl
 
         # make whatever crappy (co)variance array/value into something usable
         if len(K.shape) > 2:
@@ -56,15 +58,17 @@ class FakeIFU(object):
             else:
                 self.K = np.diag(K * np.ones(self.nl))
 
-        SNmax_ = np.max(self.true_spectra)
-        self.K /= (np.max(np.diag(K)) / SNmax**2.) # scale K now
+        SNmax_real = np.max(
+            self.true_spectra/np.sqrt(np.diag(K)[..., None, None]))
+
+        self.K *= (SNmax_real/SNmax)**2. # scale K now
 
     # =====
     # classmethods
     # =====
 
     @classmethod
-    def SingleSFH(cls, l, spec, true_params, param_names,
+    def SingleSFH(cls, logl, dlogl, spec, true_params, param_names,
                   spatial_shape=(74, 74), F_max=None, F_model=None,
                   F_params=None, **kwargs):
         '''Make an IFU with a single SFH subject to various levels of noise
@@ -72,8 +76,8 @@ class FakeIFU(object):
         Parameters
         ----------
 
-        l : :obj:`np.ndarray`
-            wavelength array, units of AA
+        logl : :obj:`np.ndarray`
+            log-wavelength array, units of AA
 
         spec : :obj:`np.ndarray`
             single spectrum, units of 1e-17 erg/s/cm2/AA
@@ -93,24 +97,33 @@ class FakeIFU(object):
 
         '''
 
+        spec /= spec.max()
         true_spectra = np.tile(spec[:, None, None], (1,) + spatial_shape)
 
-        XX, YY = self.image_coords
+        XX, YY = FakeIFU.image_coords(spatial_shape)
 
         if not F_model:
-            F_model = lambda XX, YY, r=10: np.exp(-(XX**2. + YY**2.)/r)
+            F_model = lambda XX, YY, r=30: np.exp(-np.sqrt(XX**2. + YY**2.)/r)
 
         if not F_params:
             F_params = {}
-        F_params.update('XX': XX, 'YY': YY)
+        F_params.update({'XX': XX, 'YY': YY})
+
+        l = 10.**logl
+        l_l = 10.**(logl - dlogl/2.)
+        l_u = 10.**(logl + dlogl/2.)
+        dl = l_u - l_l
 
         spec_scale = F_model(**F_params)[None, ...]
-        F = np.sum(spec_scale * true_spectra, axis=0)
-        true_spectra /= (F.max() / F_max)
 
-        kwargs.update(true_spectra)
-        kwargs.update(true_params)
-        kwargs.update(param_names)
+        F = np.sum(
+            spec_scale * true_spectra * dl[..., None, None],
+            axis=0)
+        true_spectra /= (F_max / F)
+
+        kwargs.update(
+            {'true_spectra': true_spectra, 'true_params': true_params,
+             'param_names': param_names, 'logl': logl})
 
         return cls(**kwargs)
 
@@ -119,19 +132,17 @@ class FakeIFU(object):
     # =====
 
     @property
-    def image_shape(self):
-        return self.true_spectra.shape[-2:]
-
-    @property
-    def image_coords(self):
-        return np.meshgrid(
-            [np.linspace(-s/2., s/2., s) for s in self.image_shape])
+    def ivar(self):
+        return np.tile(
+            1./np.diag(self.K)[..., None, None],
+            (1,) + self.spatial_shape)
 
     # =====
     # methods
     # =====
 
-    def make_datacube(noise_model=None, noise_model_params=None, seed=None):
+    def make_datacube(self, noise_model=None, noise_model_params=None,
+                      seed=None):
         '''Make a mock datacube with given noise characteristics
 
         Parameters
@@ -150,13 +161,18 @@ class FakeIFU(object):
         noise = np.moveaxis(noise, source=[0, 1, 2], destination=[1, 2, 0])
 
         if not noise_model:
-            noise_model = lambda _: return np.ones(self.spatial_shape)
+            noise_model = lambda _: np.ones(self.spatial_shape)
             noise_model_params = ['_'] # dummy
 
-        noise_scale = noise_model(**noise_model_params)[np.newaxis, ...]
+        noise_scale = noise_model(*noise_model_params)[np.newaxis, ...]
 
         return self.true_spectra + (noise * noise_scale)
 
     # =====
     # staticmethods
     # =====
+
+    @staticmethod
+    def image_coords(image_shape):
+        return np.meshgrid(
+            *[np.linspace(-s/2., s/2., s) for s in image_shape])
