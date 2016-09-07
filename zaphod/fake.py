@@ -3,9 +3,7 @@ some tools for creating fake galaxies!
 '''
 
 import numpy as np
-import matplotlib.pyplot as plt
 
-from astropy.io import fits
 
 class FakeIFU(object):
     '''Fake IFU manufacturing for spectral fit testing
@@ -49,7 +47,8 @@ class FakeIFU(object):
 
         # make whatever crappy (co)variance array/value into something usable
         if len(K.shape) > 2:
-            raise ValueError('invalid shape, only spectral covariance allowed')
+            raise ValueError(
+                'invalid shape, only spectral covariance allowed')
         elif len(K.shape) == 2:
             self.K = K
         else:
@@ -59,9 +58,9 @@ class FakeIFU(object):
                 self.K = np.diag(K * np.ones(self.nl))
 
         SNmax_real = np.max(
-            self.true_spectra/np.sqrt(np.diag(K)[..., None, None]))
+            self.true_spectra / np.sqrt(np.diag(K)[..., None, None]))
 
-        self.K *= (SNmax_real/SNmax)**2. # scale K now
+        self.K *= (SNmax_real / SNmax)**2.  # scale K now
 
     # =====
     # classmethods
@@ -103,15 +102,15 @@ class FakeIFU(object):
         XX, YY = FakeIFU.image_coords(spatial_shape)
 
         if not F_model:
-            F_model = lambda XX, YY, r=30: np.exp(-np.sqrt(XX**2. + YY**2.)/r)
+            def F_model(XX, YY, r=30):
+                return np.exp(-np.sqrt(XX**2. + YY**2.) / r)
 
         if not F_params:
             F_params = {}
         F_params.update({'XX': XX, 'YY': YY})
 
-        l = 10.**logl
-        l_l = 10.**(logl - dlogl/2.)
-        l_u = 10.**(logl + dlogl/2.)
+        l_l = 10.**(logl - dlogl / 2.)
+        l_u = 10.**(logl + dlogl / 2.)
         dl = l_u - l_l
 
         spec_scale = F_model(**F_params)[None, ...]
@@ -134,7 +133,7 @@ class FakeIFU(object):
     @property
     def ivar(self):
         return np.tile(
-            1./np.diag(self.K)[..., None, None],
+            1. / np.diag(self.K)[..., None, None],
             (1,) + self.spatial_shape)
 
     # =====
@@ -161,8 +160,9 @@ class FakeIFU(object):
         noise = np.moveaxis(noise, source=[0, 1, 2], destination=[1, 2, 0])
 
         if not noise_model:
-            noise_model = lambda _: np.ones(self.spatial_shape)
-            noise_model_params = ['_'] # dummy
+            def noise_model(_):
+                return np.ones(self.spatial_shape)
+            noise_model_params = ['_']  # dummy
 
         noise_scale = noise_model(*noise_model_params)[np.newaxis, ...]
 
@@ -175,4 +175,4 @@ class FakeIFU(object):
     @staticmethod
     def image_coords(image_shape):
         return np.meshgrid(
-            *[np.linspace(-s/2., s/2., s) for s in image_shape])
+            *[np.linspace(-s / 2., s / 2., s) for s in image_shape])
