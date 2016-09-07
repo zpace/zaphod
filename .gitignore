@@ -4,7 +4,7 @@
 #setuptools distribution folder
 /dist/
 
-/.ipynb_checkpoints/
+zaphod/.ipynb_checkpoints/
 
 # python egg metadata, regeneerated from source files by setuptools
 /*.egg_info
